@@ -1,0 +1,37 @@
+{
+  "name": "NGSI-Datasource",
+  "id": "ngsi-datasource",
+  "type": "datasource",
+  "partials": {
+    "config": "public/app/plugins/datasource/ngsi-datasource/partials/config.html"
+  },
+  "metrics": true,
+  "annotations": true,
+  "info": {
+    "description": "NGSI Data Source",
+    "author": {
+      "name": "CpaaS.io H2020 Research Project",
+      "url": "https://www.cpaas.io/"
+    },
+    "logos": {
+      "small": "img/FIWARE_NGSI_Logo.png",
+      "large": "img/FIWARE_NGSI_Logo.png"
+    },
+    "links": [
+      {
+        "name": "GitHub",
+        "url": "https://github.com/grafana/simple-json-datasource"
+      },
+      {
+        "name": "MIT License",
+        "url": "https://github.com/grafana/simple-json-datasource/blob/master/LICENSE"
+      }
+    ],
+    "version": "0.0.1",
+    "updated": "2018-03-18"
+  },
+  "dependencies": {
+    "grafanaVersion": "5.x.x",
+    "plugins": []
+  }
+}
