@@ -49,8 +49,6 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
     _createClass(NGSIDatasource, [{
         key: 'query',
         value: function query(options) {
-            var queryResponse = {};
-            queryResponse.data = [];
             var promises = [];
             var query = this.buildQueryParameters(options);
             query.targets = query.targets.filter(function (t) {
@@ -63,58 +61,94 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
             }
 
             for (var t in query.targets) {
-                // Timeserie response
+                // Get data from timeserie and table response
                 var targetArray = query.targets[t].target.split(".");
                 var myType = targetArray[0];
                 var myTarget = targetArray[1];
                 var myProperty = targetArray[2];
                 var maxDataPoints = query.maxDataPoints;
-
-                /* Test settings
-                myType = "testSensor";
-                myTarget = "00001C00000000000001000001000A00";
-                myProperty = "light";
-                maxDataPoints = 5;*/
-
                 if (query.targets[t].target !== undefined && query.targets[t].target !== "select entity") {
+                    var rangeFrom = new Date(query.range.from).toISOString();
+                    var rangeTo = new Date(query.range.to).toISOString();
+
                     promises.push(this.doRequest({
-                        url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "?lastN=" + maxDataPoints + "&dateFrom=" + query.range.from + "&dateTo=" + query.range.to,
+                        url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "?lastN=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
                         method: 'GET'
                     }));
                 } else {
                     return { data: [] };
                 }
             }
+
             return Promise.all(promises).then(function (results) {
                 var returnArray = [];
+                var queryResponse = {};
+                queryResponse.data = [];
 
-                for (var r in results) {
-                    var _returnObject = {};
-                    _returnObject.datapoints = [];
+                if (query.targets[0].type === "timeserie") {
+                    // Timeseries format
+                    for (var r in results) {
+                        var returnObject = {};
+                        returnObject.datapoints = [];
 
-                    var contextElement = results[r].data.contextResponses[0].contextElement;
-                    var values = contextElement.attributes[0].values;
-                    _returnObject.target = contextElement.attributes[0].name + " (" + contextElement.type + ": " + contextElement.id + ")";
+                        var contextElement = results[r].data.contextResponses[0].contextElement;
+                        var values = contextElement.attributes[0].values;
+                        returnObject.target = contextElement.attributes[0].name + " (" + contextElement.type + ": " + contextElement.id + ")";
 
-                    for (var v in values) {
-                        var time = void 0,
-                            timeSplit = void 0,
-                            unixTime = void 0;
-                        var datapointArray = [];
-                        time = values[v].recvTime;
-                        time += "Z";
-                        timeSplit = time.split(' ');
-                        time = timeSplit[0] + "T" + timeSplit[1];
-                        unixTime = new Date(time).getTime();
-                        datapointArray.push(values[v].attrValue);
-                        datapointArray.push(unixTime);
-                        _returnObject.datapoints.push(datapointArray);
+                        for (var v in values) {
+                            var time = void 0,
+                                timeSplit = void 0,
+                                unixTime = void 0;
+                            var datapointArray = [];
+                            time = values[v].recvTime;
+                            time += "Z";
+                            timeSplit = time.split(' ');
+                            time = timeSplit[0] + "T" + timeSplit[1];
+                            unixTime = new Date(time).getTime();
+                            datapointArray.push(values[v].attrValue);
+                            datapointArray.push(unixTime);
+                            returnObject.datapoints.push(datapointArray);
+                        }
+                        returnArray.push(returnObject);
                     }
-                    returnArray.push(_returnObject);
+                } else if (query.targets[0].type === "table") {
+                    // Table format
+                    var rowArray = [];
+
+                    for (var _r in results) {
+                        var _contextElement = results[_r].data.contextResponses[0].contextElement;
+                        var _returnObject = {};
+                        _returnObject.type = "table";
+                        _returnObject.columns = [{ text: "Time" }, { text: "Value" }, { text: "geohash" }];
+                        _returnObject.rows = [];
+
+                        // TODO Make query for geolocation attribute here
+
+                        // fill rows
+                        for (var _v in _contextElement.attributes[0].values) {
+                            var row = [];
+                            row.push(_contextElement.attributes[0].values[_v].recvTime);
+                            row.push(_contextElement.attributes[0].values[_v].attrValue);
+
+                            // TODO Match recvTime with geolocation attribute and copy geohash
+
+                            // Generate random geohash
+                            var geohashLength = 12;
+                            var geohash = "";
+                            var char_list = "abcdefghijklmnopqrstuvwxyz0123456789";
+                            for (var i = 0; i < geohashLength; i++) {
+                                geohash += char_list.charAt(Math.floor(Math.random() * char_list.length));
+                            }
+
+                            row.push(geohash);
+                            rowArray.push(row);
+                        }
+                        _returnObject.rows = rowArray;
+                        returnArray.push(_returnObject);
+                    }
                 }
-                var returnObject = {};
-                returnObject.data = returnArray;
-                return returnObject;
+                queryResponse.data = returnArray;
+                return queryResponse;
             });
         }
     }, {
@@ -247,21 +281,6 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
 
     return NGSIDatasource;
 }();
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
-//# sourceMappingURL=datasource.js.map
 //# sourceMappingURL=datasource.js.map
 //# sourceMappingURL=datasource.js.map
 //# sourceMappingURL=datasource.js.map

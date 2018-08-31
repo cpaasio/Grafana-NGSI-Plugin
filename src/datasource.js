@@ -17,8 +17,6 @@ export class NGSIDatasource {
     }
 
     query(options) {
-        let queryResponse = {};
-        queryResponse.data = [];
         let promises = [];
         let query = this.buildQueryParameters(options);
         query.targets = query.targets.filter(t => !t.hide);
@@ -29,22 +27,18 @@ export class NGSIDatasource {
         }
 
         for (let t in query.targets) {
-            // Timeserie response
+            // Get data from timeserie and table response
             let targetArray = query.targets[t].target.split(".");
             let myType = targetArray[0];
             let myTarget = targetArray [1];
             let myProperty = targetArray[2];
             let maxDataPoints = query.maxDataPoints;
-
-            /* Test settings
-            myType = "testSensor";
-            myTarget = "00001C00000000000001000001000A00";
-            myProperty = "light";
-            maxDataPoints = 5;*/
-
             if (query.targets[t].target !== undefined && query.targets[t].target !== "select entity") {
+                let rangeFrom = new Date(query.range.from).toISOString();
+                let rangeTo = new Date(query.range.to).toISOString();
+
                 promises.push(this.doRequest({
-                    url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "?lastN=" + maxDataPoints + "&dateFrom=" + query.range.from + "&dateTo=" + query.range.to,
+                    url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "?lastN=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
                     method: 'GET',
                 }));
             }
@@ -52,34 +46,76 @@ export class NGSIDatasource {
                 return ({data: []});
             }
         }
+
         return Promise.all(promises).then(results => {
             let returnArray = [];
+            let queryResponse = {};
+            queryResponse.data = [];
 
-            for (let r in results) {
-                let returnObject = {};
-                returnObject.datapoints = [];
+            if (query.targets[0].type === "timeserie") {
+                // Timeseries format
+                for (let r in results) {
+                    let returnObject = {};
+                    returnObject.datapoints = [];
 
-                let contextElement = results[r].data.contextResponses[0].contextElement;
-                let values = contextElement.attributes[0].values;
-                returnObject.target = contextElement.attributes[0].name + " (" + contextElement.type + ": " + contextElement.id + ")";
+                    let contextElement = results[r].data.contextResponses[0].contextElement;
+                    let values = contextElement.attributes[0].values;
+                    returnObject.target = contextElement.attributes[0].name + " (" + contextElement.type + ": " + contextElement.id + ")";
 
-                for (let v in values) {
-                    let time, timeSplit, unixTime;
-                    let datapointArray = [];
-                    time = values[v].recvTime;
-                    time += "Z";
-                    timeSplit = time.split(' ');
-                    time = timeSplit[0] + "T" + timeSplit[1];
-                    unixTime = new Date(time).getTime();
-                    datapointArray.push(values[v].attrValue);
-                    datapointArray.push(unixTime);
-                    returnObject.datapoints.push(datapointArray);
+                    for (let v in values) {
+                        let time, timeSplit, unixTime;
+                        let datapointArray = [];
+                        time = values[v].recvTime;
+                        time += "Z";
+                        timeSplit = time.split(' ');
+                        time = timeSplit[0] + "T" + timeSplit[1];
+                        unixTime = new Date(time).getTime();
+                        datapointArray.push(values[v].attrValue);
+                        datapointArray.push(unixTime);
+                        returnObject.datapoints.push(datapointArray);
+                    }
+                    returnArray.push(returnObject);
                 }
-                returnArray.push(returnObject);
             }
-            let returnObject = {};
-            returnObject.data = returnArray;
-            return(returnObject);
+            else if (query.targets[0].type === "table") {
+                // Table format
+                let rowArray = [];
+
+                for (let r in results) {
+                    let contextElement = results[r].data.contextResponses[0].contextElement;
+                    let returnObject = {};
+                    returnObject.type = "table";
+                    returnObject.columns = [{text:"Time"}, {text:"Value"}, {text:"geohash"}];
+                    returnObject.rows = [];
+
+                    // TODO Make query for geolocation attribute here
+
+                    // fill rows
+                    for (let v in contextElement.attributes[0].values) {
+                        let row = [];
+                        row.push(contextElement.attributes[0].values[v].recvTime);
+                        row.push(contextElement.attributes[0].values[v].attrValue);
+
+                        // TODO Match recvTime with geolocation attribute and copy geohash
+
+                        // Generate random geohash
+                        const geohashLength = 12;
+                        let geohash = "";
+                        let char_list = "abcdefghijklmnopqrstuvwxyz0123456789";
+                        for(let i=0; i < geohashLength; i++ )
+                        {
+                            geohash += char_list.charAt(Math.floor(Math.random() * char_list.length));
+                        }
+
+                        row.push(geohash);
+                        rowArray.push(row);
+                    }
+                    returnObject.rows = rowArray;
+                    returnArray.push(returnObject);
+                }
+            }
+            queryResponse.data = returnArray;
+            return (queryResponse);
         });
     }
 
