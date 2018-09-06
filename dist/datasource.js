@@ -67,6 +67,9 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
                 var myTarget = targetArray[1];
                 var myProperty = targetArray[2];
                 var maxDataPoints = query.maxDataPoints;
+                if (maxDataPoints === 1) {
+                    maxDataPoints = 1250;
+                }
                 if (query.targets[t].target !== undefined && query.targets[t].target !== "select entity") {
                     var rangeFrom = new Date(query.range.from).toISOString();
                     var rangeTo = new Date(query.range.to).toISOString();
@@ -112,11 +115,11 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
                         returnArray.push(returnObject);
                     }
                 } else if (query.targets[0].type === "table") {
-                    // Table format
+                    // Table format (used for World Map Plugin)
                     var rowArray = [];
 
                     for (var _r in results) {
-                        var _contextElement = results[_r].data.contextResponses[0].contextElement;
+                        var _contextElement = results[_r].data.contextResponses[0].contextElement.attributes[0].values;
                         var _returnObject = {};
                         _returnObject.type = "table";
                         _returnObject.columns = [{ text: "Time" }, { text: "Value" }, { text: "geohash" }];
@@ -124,11 +127,11 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
 
                         // TODO Make query for geolocation attribute here
 
-                        // fill rows
-                        for (var _v in _contextElement.attributes[0].values) {
+                        // create one row per result
+                        for (var _v in _contextElement) {
                             var row = [];
-                            row.push(_contextElement.attributes[0].values[_v].recvTime);
-                            row.push(_contextElement.attributes[0].values[_v].attrValue);
+                            row.push(_contextElement[_v].recvTime);
+                            row.push(_contextElement[_v].attrValue);
 
                             // TODO Match recvTime with geolocation attribute and copy geohash
 
@@ -276,6 +279,133 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
             options.targets = targets;
 
             return options;
+        }
+    }, {
+        key: 'encodeGeoHash',
+        value: function encodeGeoHash(lat, lon, precision) {
+            if (typeof precision === 'undefined') {
+                // refine geohash until it matches precision of supplied lat/lon
+                for (var p = 1; p <= 12; p++) {
+                    var hash = this.encodeGeoHash(lat, lon, p);
+                    var posn = this.decodeGeohash(hash);
+                    if (posn.lat === lat && posn.lon === lon) {
+                        return hash;
+                    }
+                }
+                precision = 12; // set to maximum
+            }
+
+            lat = Number(lat);
+            lon = Number(lon);
+            precision = Number(precision);
+
+            if (isNaN(lat) || isNaN(lon) || isNaN(precision)) throw new Error('Invalid geoposition');
+
+            var base32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+            var idx = 0; // index into base32 map
+            var bit = 0; // each char holds 5 bits
+            var evenBit = true;
+            var geohash = '';
+
+            var latMin = -90,
+                latMax = 90;
+            var lonMin = -180,
+                lonMax = 180;
+
+            while (geohash.length < precision) {
+                if (evenBit) {
+                    // bisect E-W longitude
+                    var lonMid = (lonMin + lonMax) / 2;
+                    if (lon >= lonMid) {
+                        idx = idx * 2 + 1;
+                        lonMin = lonMid;
+                    } else {
+                        idx = idx * 2;
+                        lonMax = lonMid;
+                    }
+                } else {
+                    // bisect N-S latitude
+                    var latMid = (latMin + latMax) / 2;
+                    if (lat >= latMid) {
+                        idx = idx * 2 + 1;
+                        latMin = latMid;
+                    } else {
+                        idx = idx * 2;
+                        latMax = latMid;
+                    }
+                }
+                evenBit = !evenBit;
+
+                if (++bit === 5) {
+                    // 5 bits gives us a character: append it and start over
+                    geohash += base32.charAt(idx);
+                    bit = 0;
+                    idx = 0;
+                }
+            }
+            return geohash;
+        }
+    }, {
+        key: 'decodeGeohash',
+        value: function decodeGeohash(geohash) {
+            var base32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+
+            if (geohash.length === 0) throw new Error('Invalid geohash');
+            geohash = geohash.toLowerCase();
+
+            var evenBit = true;
+            var latMin = -90,
+                latMax = 90;
+            var lonMin = -180,
+                lonMax = 180;
+
+            for (var i = 0; i < geohash.length; i++) {
+                var chr = geohash.charAt(i);
+                var idx = base32.indexOf(chr);
+                if (idx === -1) throw new Error('Invalid geohash');
+
+                for (var n = 4; n >= 0; n--) {
+                    var bitN = idx >> n & 1;
+                    if (evenBit) {
+                        // longitude
+                        var lonMid = (lonMin + lonMax) / 2;
+                        if (bitN === 1) {
+                            lonMin = lonMid;
+                        } else {
+                            lonMax = lonMid;
+                        }
+                    } else {
+                        // latitude
+                        var latMid = (latMin + latMax) / 2;
+                        if (bitN === 1) {
+                            latMin = latMid;
+                        } else {
+                            latMax = latMid;
+                        }
+                    }
+                    evenBit = !evenBit;
+                }
+            }
+
+            var bounds = {
+                sw: { lat: latMin, lon: lonMin },
+                ne: { lat: latMax, lon: lonMax }
+            };
+
+            latMin = bounds.sw.lat;
+            lonMin = bounds.sw.lon;
+            latMax = bounds.ne.lat;
+            lonMax = bounds.ne.lon;
+
+            // cell centre
+            var lat = (latMin + latMax) / 2;
+            var lon = (lonMin + lonMax) / 2;
+
+            // round to close to centre without excessive precision: ⌊2-log10(Δ°)⌋ decimal places
+            lat = lat.toFixed(Math.floor(2 - Math.log(latMax - latMin) / Math.LN10));
+            lon = lon.toFixed(Math.floor(2 - Math.log(lonMax - lonMin) / Math.LN10));
+
+            return { lat: Number(lat), lon: Number(lon) };
         }
     }]);
 

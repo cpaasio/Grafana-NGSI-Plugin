@@ -33,6 +33,9 @@ export class NGSIDatasource {
             let myTarget = targetArray [1];
             let myProperty = targetArray[2];
             let maxDataPoints = query.maxDataPoints;
+            if (maxDataPoints === 1) {
+                maxDataPoints = 1250;
+            }
             if (query.targets[t].target !== undefined && query.targets[t].target !== "select entity") {
                 let rangeFrom = new Date(query.range.from).toISOString();
                 let rangeTo = new Date(query.range.to).toISOString();
@@ -78,11 +81,11 @@ export class NGSIDatasource {
                 }
             }
             else if (query.targets[0].type === "table") {
-                // Table format
+                // Table format (used for World Map Plugin)
                 let rowArray = [];
 
                 for (let r in results) {
-                    let contextElement = results[r].data.contextResponses[0].contextElement;
+                    let contextElement = results[r].data.contextResponses[0].contextElement.attributes[0].values;
                     let returnObject = {};
                     returnObject.type = "table";
                     returnObject.columns = [{text:"Time"}, {text:"Value"}, {text:"geohash"}];
@@ -90,11 +93,11 @@ export class NGSIDatasource {
 
                     // TODO Make query for geolocation attribute here
 
-                    // fill rows
-                    for (let v in contextElement.attributes[0].values) {
+                    // create one row per result
+                    for (let v in contextElement) {
                         let row = [];
-                        row.push(contextElement.attributes[0].values[v].recvTime);
-                        row.push(contextElement.attributes[0].values[v].attrValue);
+                        row.push(contextElement[v].recvTime);
+                        row.push(contextElement[v].attrValue);
 
                         // TODO Match recvTime with geolocation attribute and copy geohash
 
@@ -225,7 +228,7 @@ export class NGSIDatasource {
             return target.target !== 'select entity';
         });
 
-        var targets = _.map(options.targets, target => {
+        let targets = _.map(options.targets, target => {
             return {
                 target: this.templateSrv.replace(target.target, options.scopedVars, 'regex'),
                 refId: target.refId,
@@ -237,5 +240,129 @@ export class NGSIDatasource {
         options.targets = targets;
 
         return options;
+    }
+
+    encodeGeoHash (lat, lon, precision) {
+        if (typeof precision === 'undefined') {
+            // refine geohash until it matches precision of supplied lat/lon
+            for (let p=1; p<=12; p++) {
+                let hash = this.encodeGeoHash(lat, lon, p);
+                let posn = this.decodeGeohash(hash);
+                if (posn.lat === lat && posn.lon === lon) {
+                    return hash;
+                }
+            }
+            precision = 12; // set to maximum
+        }
+
+        lat = Number(lat);
+        lon = Number(lon);
+        precision = Number(precision);
+
+        if (isNaN(lat) || isNaN(lon) || isNaN(precision)) throw new Error('Invalid geoposition');
+
+        const base32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+        let idx = 0; // index into base32 map
+        let bit = 0; // each char holds 5 bits
+        let evenBit = true;
+        let geohash = '';
+
+        let latMin =  -90, latMax =  90;
+        let lonMin = -180, lonMax = 180;
+
+        while (geohash.length < precision) {
+            if (evenBit) {
+                // bisect E-W longitude
+                let lonMid = (lonMin + lonMax) / 2;
+                if (lon >= lonMid) {
+                    idx = idx*2 + 1;
+                    lonMin = lonMid;
+                }
+                else {
+                    idx = idx*2;
+                    lonMax = lonMid;
+                }
+            }
+            else {
+                // bisect N-S latitude
+                let latMid = (latMin + latMax) / 2;
+                if (lat >= latMid) {
+                    idx = idx*2 + 1;
+                    latMin = latMid;
+                }
+                else {
+                    idx = idx*2;
+                    latMax = latMid;
+                }
+            }
+            evenBit = !evenBit;
+
+            if (++bit === 5) {
+                // 5 bits gives us a character: append it and start over
+                geohash += base32.charAt(idx);
+                bit = 0;
+                idx = 0;
+            }
+        }
+        return geohash;
+    }
+
+    decodeGeohash (geohash) {
+        const base32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+
+        if (geohash.length === 0) throw new Error('Invalid geohash');
+        geohash = geohash.toLowerCase();
+
+        let evenBit = true;
+        let latMin =  -90, latMax =  90;
+        let lonMin = -180, lonMax = 180;
+
+        for (let i = 0; i < geohash.length; i++) {
+            let chr = geohash.charAt(i);
+            let idx = base32.indexOf(chr);
+            if (idx === -1) throw new Error('Invalid geohash');
+
+            for (let n = 4; n >= 0; n--) {
+                let bitN = idx >> n & 1;
+                if (evenBit) {
+                    // longitude
+                    let lonMid = (lonMin+lonMax) / 2;
+                    if (bitN === 1) {
+                        lonMin = lonMid;
+                    } else {
+                        lonMax = lonMid;
+                    }
+                } else {
+                    // latitude
+                    let latMid = (latMin+latMax) / 2;
+                    if (bitN === 1) {
+                        latMin = latMid;
+                    } else {
+                        latMax = latMid;
+                    }
+                }
+                evenBit = !evenBit;
+            }
+        }
+
+        let bounds = {
+            sw: { lat: latMin, lon: lonMin },
+            ne: { lat: latMax, lon: lonMax },
+        };
+
+        latMin = bounds.sw.lat;
+        lonMin = bounds.sw.lon;
+        latMax = bounds.ne.lat;
+        lonMax = bounds.ne.lon;
+
+        // cell centre
+        let lat = (latMin + latMax)/2;
+        let lon = (lonMin + lonMax)/2;
+
+        // round to close to centre without excessive precision: ⌊2-log10(Δ°)⌋ decimal places
+        lat = lat.toFixed(Math.floor(2-Math.log(latMax-latMin)/Math.LN10));
+        lon = lon.toFixed(Math.floor(2-Math.log(lonMax-lonMin)/Math.LN10));
+
+        return { lat: Number(lat), lon: Number(lon) };
     }
 }
