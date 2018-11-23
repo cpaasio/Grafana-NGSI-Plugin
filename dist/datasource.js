@@ -49,6 +49,8 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
     _createClass(NGSIDatasource, [{
         key: 'query',
         value: function query(options) {
+            var _this = this;
+
             var promises = [];
             var query = this.buildQueryParameters(options);
             query.targets = query.targets.filter(function (t) {
@@ -75,7 +77,17 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
                     var rangeTo = new Date(query.range.to).toISOString();
 
                     promises.push(this.doRequest({
-                        url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "?lastN=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
+                        url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "?hLimit=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
+                        method: 'GET'
+                    }));
+
+                    promises.push(this.doRequest({
+                        url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "___Latitude?hLimit=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
+                        method: 'GET'
+                    }));
+
+                    promises.push(this.doRequest({
+                        url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "___Longitude?hLimit=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
                         method: 'GET'
                     }));
                 } else {
@@ -91,63 +103,86 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
                 if (query.targets[0].type === "timeserie") {
                     // Timeseries format
                     for (var r in results) {
-                        var returnObject = {};
-                        returnObject.datapoints = [];
-
                         var contextElement = results[r].data.contextResponses[0].contextElement;
-                        var values = contextElement.attributes[0].values;
-                        returnObject.target = contextElement.attributes[0].name + " (" + contextElement.type + ": " + contextElement.id + ")";
 
-                        for (var v in values) {
-                            var time = void 0,
-                                timeSplit = void 0,
-                                unixTime = void 0;
-                            var datapointArray = [];
-                            time = values[v].recvTime;
-                            time += "Z";
-                            timeSplit = time.split(' ');
-                            time = timeSplit[0] + "T" + timeSplit[1];
-                            unixTime = new Date(time).getTime();
-                            datapointArray.push(values[v].attrValue);
-                            datapointArray.push(unixTime);
-                            returnObject.datapoints.push(datapointArray);
+                        if (contextElement.attributes[0].name.includes("___") === false) {
+                            // Attribute is not metadata
+                            var returnObject = {};
+                            returnObject.datapoints = [];
+
+                            var values = contextElement.attributes[0].values;
+                            returnObject.target = contextElement.attributes[0].name + " (" + contextElement.type + ": " + contextElement.id + ")";
+
+                            for (var v in values) {
+                                var time = void 0,
+                                    timeSplit = void 0,
+                                    unixTime = void 0;
+                                var datapointArray = [];
+                                time = values[v].recvTime;
+                                time += "Z";
+                                timeSplit = time.split(' ');
+                                time = timeSplit[0] + "T" + timeSplit[1];
+                                unixTime = new Date(time).getTime();
+                                datapointArray.push(values[v].attrValue);
+                                datapointArray.push(unixTime);
+                                returnObject.datapoints.push(datapointArray);
+                            }
+                            returnArray.push(returnObject);
                         }
-                        returnArray.push(returnObject);
                     }
                 } else if (query.targets[0].type === "table") {
                     // Table format (used for World Map Plugin)
                     var rowArray = [];
+                    var _r = 0;
 
-                    for (var _r in results) {
-                        var _contextElement = results[_r].data.contextResponses[0].contextElement.attributes[0].values;
+                    while (_r < results.length) {
+                        var valueElement = results[_r].data.contextResponses[0].contextElement.attributes[0].values;
+                        var latitudeElement = results[_r + 1].data.contextResponses[0].contextElement.attributes[0].values;
+                        var longitudeElement = results[_r + 2].data.contextResponses[0].contextElement.attributes[0].values;
+
                         var _returnObject = {};
                         _returnObject.type = "table";
-                        _returnObject.columns = [{ text: "Time" }, { text: "Value" }, { text: "geohash" }];
+                        _returnObject.columns = [{ text: "Time" }, { text: "Value" }, { text: "geohash" }, { text: "latitude" }, { text: "longitude" }];
                         _returnObject.rows = [];
 
-                        // TODO Make query for geolocation attribute here
-
-                        // create one row per result
-                        for (var _v in _contextElement) {
+                        // create rows
+                        for (var _v in valueElement) {
                             var row = [];
-                            row.push(_contextElement[_v].recvTime);
-                            row.push(_contextElement[_v].attrValue);
+                            row.push(valueElement[_v].recvTime);
+                            row.push(valueElement[_v].attrValue);
 
-                            // TODO Match recvTime with geolocation attribute and copy geohash
+                            var lat = latitudeElement[_v].attrValue;
+                            var long = longitudeElement[_v].attrValue;
+                            var geohash = void 0;
 
-                            // Generate random geohash
-                            var geohashLength = 12;
-                            var geohash = "";
-                            var char_list = "abcdefghijklmnopqrstuvwxyz0123456789";
-                            for (var i = 0; i < geohashLength; i++) {
-                                geohash += char_list.charAt(Math.floor(Math.random() * char_list.length));
+                            if (isNaN(lat) === false && isNaN(long) === false) {
+                                // Coordinates as numbers available
+                                geohash = _this.encodeGeoHash(lat, long); // format: u0m713d5ubmd
+
+
+                                // Generate random geohash
+                                /*const geohashLength = 12;
+                                let geohash = "";
+                                let char_list = "abcdefghijklmnopqrstuvwxyz0123456789";
+                                for(let i=0; i < geohashLength; i++ )
+                                {
+                                    geohash += char_list.charAt(Math.floor(Math.random() * char_list.length));
+                                }*/
+                            } else {
+                                geohash = "gzzzzzzzzzzz";
                             }
 
                             row.push(geohash);
+                            row.push(lat);
+                            row.push(long);
+
                             rowArray.push(row);
                         }
                         _returnObject.rows = rowArray;
                         returnArray.push(_returnObject);
+
+                        // Step size = number of queries made above. ADJUST ACCORDINGLY!
+                        _r += 3;
                     }
                 }
                 queryResponse.data = returnArray;
@@ -260,7 +295,7 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
     }, {
         key: 'buildQueryParameters',
         value: function buildQueryParameters(options) {
-            var _this = this;
+            var _this2 = this;
 
             //remove placeholder targets
             options.targets = _lodash2.default.filter(options.targets, function (target) {
@@ -269,7 +304,7 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
 
             var targets = _lodash2.default.map(options.targets, function (target) {
                 return {
-                    target: _this.templateSrv.replace(target.target, options.scopedVars, 'regex'),
+                    target: _this2.templateSrv.replace(target.target, options.scopedVars, 'regex'),
                     refId: target.refId,
                     hide: target.hide,
                     type: target.type || 'timeserie'
@@ -411,6 +446,5 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
 
     return NGSIDatasource;
 }();
-//# sourceMappingURL=datasource.js.map
 //# sourceMappingURL=datasource.js.map
 //# sourceMappingURL=datasource.js.map
