@@ -163,7 +163,7 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
                                 // Generate random geohash
                                 /*const geohashLength = 12;
                                 let geohash = "";
-                                let char_list = "abcdefghijklmnopqrstuvwxyz0123456789";
+                                const char_list = "abcdefghijklmnopqrstuvwxyz0123456789";
                                 for(let i=0; i < geohashLength; i++ )
                                 {
                                     geohash += char_list.charAt(Math.floor(Math.random() * char_list.length));
@@ -446,5 +446,9 @@ var NGSIDatasource = exports.NGSIDatasource = function () {
 
     return NGSIDatasource;
 }();
+//# sourceMappingURL=datasource.js.map
+//# sourceMappingURL=datasource.js.map
+//# sourceMappingURL=datasource.js.map
+//# sourceMappingURL=datasource.js.map
 //# sourceMappingURL=datasource.js.map
 //# sourceMappingURL=datasource.js.map

@@ -41,7 +41,17 @@ export class NGSIDatasource {
                 let rangeTo = new Date(query.range.to).toISOString();
 
                 promises.push(this.doRequest({
-                    url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "?lastN=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
+                    url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "?hLimit=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
+                    method: 'GET',
+                }));
+
+                promises.push(this.doRequest({
+                    url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "___Latitude?hLimit=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
+                    method: 'GET',
+                }));
+
+                promises.push(this.doRequest({
+                    url: this.url + "/v1/contextEntities/type/" + myType + "/id/" + myTarget + "/attributes/" + myProperty + "___Longitude?hLimit=" + maxDataPoints + "&dateFrom=" + rangeFrom + "&dateTo=" + rangeTo,
                     method: 'GET',
                 }));
             }
@@ -58,63 +68,87 @@ export class NGSIDatasource {
             if (query.targets[0].type === "timeserie") {
                 // Timeseries format
                 for (let r in results) {
-                    let returnObject = {};
-                    returnObject.datapoints = [];
-
                     let contextElement = results[r].data.contextResponses[0].contextElement;
-                    let values = contextElement.attributes[0].values;
-                    returnObject.target = contextElement.attributes[0].name + " (" + contextElement.type + ": " + contextElement.id + ")";
 
-                    for (let v in values) {
-                        let time, timeSplit, unixTime;
-                        let datapointArray = [];
-                        time = values[v].recvTime;
-                        time += "Z";
-                        timeSplit = time.split(' ');
-                        time = timeSplit[0] + "T" + timeSplit[1];
-                        unixTime = new Date(time).getTime();
-                        datapointArray.push(values[v].attrValue);
-                        datapointArray.push(unixTime);
-                        returnObject.datapoints.push(datapointArray);
+                    if (contextElement.attributes[0].name.includes("___") === false) {
+                        // Attribute is not metadata
+                        let returnObject = {};
+                        returnObject.datapoints = [];
+
+
+                        let values = contextElement.attributes[0].values;
+                        returnObject.target = contextElement.attributes[0].name + " (" + contextElement.type + ": " + contextElement.id + ")";
+
+                        for (let v in values) {
+                            let time, timeSplit, unixTime;
+                            let datapointArray = [];
+                            time = values[v].recvTime;
+                            time += "Z";
+                            timeSplit = time.split(' ');
+                            time = timeSplit[0] + "T" + timeSplit[1];
+                            unixTime = new Date(time).getTime();
+                            datapointArray.push(values[v].attrValue);
+                            datapointArray.push(unixTime);
+                            returnObject.datapoints.push(datapointArray);
+                        }
+                        returnArray.push(returnObject);
                     }
-                    returnArray.push(returnObject);
                 }
             }
             else if (query.targets[0].type === "table") {
                 // Table format (used for World Map Plugin)
                 let rowArray = [];
+                let r = 0;
 
-                for (let r in results) {
-                    let contextElement = results[r].data.contextResponses[0].contextElement.attributes[0].values;
+                while (r < results.length) {
+                    let valueElement = results[r].data.contextResponses[0].contextElement.attributes[0].values;
+                    let latitudeElement = results[r+1].data.contextResponses[0].contextElement.attributes[0].values;
+                    let longitudeElement = results[r+2].data.contextResponses[0].contextElement.attributes[0].values;
+
                     let returnObject = {};
                     returnObject.type = "table";
-                    returnObject.columns = [{text:"Time"}, {text:"Value"}, {text:"geohash"}];
+                    returnObject.columns = [{text:"Time"}, {text:"Value"}, {text:"geohash"}, {text:"latitude"}, {text:"longitude"}];
                     returnObject.rows = [];
 
-                    // TODO Make query for geolocation attribute here
-
-                    // create one row per result
-                    for (let v in contextElement) {
+                    // create rows
+                    for (let v in valueElement) {
                         let row = [];
-                        row.push(contextElement[v].recvTime);
-                        row.push(contextElement[v].attrValue);
+                        row.push(valueElement[v].recvTime);
+                        row.push(valueElement[v].attrValue);
 
-                        // TODO Match recvTime with geolocation attribute and copy geohash
+                        let lat = latitudeElement[v].attrValue;
+                        let long = longitudeElement[v].attrValue;
+                        let geohash;
 
-                        // Generate random geohash
-                        const geohashLength = 12;
-                        let geohash = "";
-                        let char_list = "abcdefghijklmnopqrstuvwxyz0123456789";
-                        for(let i=0; i < geohashLength; i++ )
-                        {
-                            geohash += char_list.charAt(Math.floor(Math.random() * char_list.length));
+                        if (isNaN(lat) === false && isNaN(long) === false) {
+                            // Coordinates as numbers available
+                            geohash = this.encodeGeoHash(lat, long); // format: u0m713d5ubmd
+
+
+                            // Generate random geohash
+                            /*const geohashLength = 12;
+                            let geohash = "";
+                            const char_list = "abcdefghijklmnopqrstuvwxyz0123456789";
+                            for(let i=0; i < geohashLength; i++ )
+                            {
+                                geohash += char_list.charAt(Math.floor(Math.random() * char_list.length));
+                            }*/
+                        }
+                        else {
+                            geohash = "gzzzzzzzzzzz";
                         }
 
                         row.push(geohash);
+                        row.push(lat);
+                        row.push(long);
+
                         rowArray.push(row);
                     }
                     returnObject.rows = rowArray;
                     returnArray.push(returnObject);
+
+                    // Step size = number of queries made above. ADJUST ACCORDINGLY!
+                    r+=3;
                 }
             }
             queryResponse.data = returnArray;
